@@ -44,15 +44,22 @@ def create_seqinfo(mw, series_files, series_id):
         # 2D images in each dcm file
         # We'll have Nsl * Nt files.
         # Check the acquisition type (2D/3D):
-        if (dcminfo.get([0x18, 0x23]).value == '2D'):
-            Nsl = parse_private_csa_header(
-                mw.dcm_data, 'SliceArray.lSize', 'sSliceArray.lSize'
-            )
+        if dcminfo.get([0x18, 0x23]):
+            if dcminfo.get([0x21, 0x104f]):	   # GE:
+                Nsl = dcminfo.get([0x21, 0x104f]).value
+            else:
+                if (dcminfo.get([0x18, 0x23]).value == '2D'):
+                    Nsl = parse_private_csa_header(
+                        mw.dcm_data, 'SliceArray.lSize', 'sSliceArray.lSize'
+                    )
+                else:
+                    # 3D acquisition
+                    Nsl = parse_private_csa_header(
+                        mw.dcm_data, 'sKSpace.lImagesPerSlab', 'sKSpace.lImagesPerSlab'
+                    )
         else:
-            # 3D acquisition
-            Nsl = parse_private_csa_header(
-                mw.dcm_data, 'sKSpace.lImagesPerSlab', 'sKSpace.lImagesPerSlab'
-            )
+            # Not a normal sequence. Set Nsl to len(series_files):
+            Nsl = len(series_files)
         size = list(mw.image_shape) + [Nsl, len(series_files) // Nsl ]
 
     if len(size) < 4:
@@ -342,8 +349,26 @@ def get_dicom_series_time(dicom_list):
     import calendar
 
     dicom = dcm.read_file(dicom_list[0], stop_before_pixels=True, force=True)
-    dcm_date = dicom.SeriesDate  # YYYYMMDD
-    dcm_time = dicom.SeriesTime  # HHMMSS.MICROSEC
+    # check possible tags with image date; if not found, default to 20000101:
+    dcm_date = '20000101'      # default
+    for key in [
+        0x00080021,     # (0008, 0021) Series Date
+        0x00080022,     # (0008, 0022) Acquisition Date
+        0x00080023,     # (0008, 0023) Content Date
+    ]:
+        if key in dicom.keys():
+            dcm_date = dicom[key].value  # YYYYMMDD
+
+    # check possible tags with image time; if not found, default to 000000.:
+    dcm_time = '000000.'      # default
+    for key in [
+        0x00080031,     # (0008, 0021) Series Time
+        0x00080032,     # (0008, 0022) Acquisition Time
+        0x00080033,     # (0008, 0023) Content Time
+    ]:
+        if key in dicom.keys():
+            dcm_time = dicom[key].value  # HHMMSS.MICROSEC
+
     dicom_time_str = dcm_date + dcm_time.split('.', 1)[0]  # YYYYMMDDHHMMSS
     # convert to epoch
     return calendar.timegm(time.strptime(dicom_time_str, '%Y%m%d%H%M%S'))
