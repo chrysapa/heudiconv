@@ -56,12 +56,20 @@ def extract_task_name(prot_name):
         'fix',
         'films',
         'inscapes',
+        'lo bold',
+        'loc bold',
+        'mt bold',
+        'ret bold',
     ]
     for task_name in known_tasks:
         if task_name in prot_name:
+            task_name = task_name.split(' bold')[0]
             break  # we keep the current value for "task"
         else:
             task_name = ''
+    # ad hoc fixes:
+    if task_name == 'lo':
+        task_name = 'loc'
 
     # if we don't find a known task, try finding the keyword "task":
     if task_name == '':
@@ -363,7 +371,7 @@ def infotodict(seqinfo):
         ):
 
             # check task name:
-            task = extract_task_name(s.protocol_name)
+            task = extract_task_name(s.series_description)
             # find the run number for this task:
             if run_numbers.get(task):
                 run_numbers[task] += 1
