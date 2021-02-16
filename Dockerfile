@@ -26,7 +26,7 @@ RUN mkdir /tmp/dcmstack && \
     curl -sSL https://github.com/moloney/dcmstack/archive/${DCMSTACK_VERSION}.tar.gz \
         | tar -vxz -C /tmp/dcmstack --strip-components=1 && \
     cd /tmp/dcmstack && \
-    easy_install ./ && \
+    python setup.py install && \
     cd / && rm -rf /tmp/dcmstack
 
 # Install dcm2niix from github (it requires git to "superbuild"):
@@ -54,7 +54,7 @@ RUN mkdir /tmp/bidsphysio && \
     rm -rf /tmp/bidsphysio
 
 # Install heudiconv from github:
-ENV CBIHEUDICONV_VERSION=v3.5.1
+ENV CBIHEUDICONV_VERSION=v3.6
 RUN mkdir /tmp/heudiconv && \
     curl -sSL https://github.com/cbinyu/heudiconv/archive/${CBIHEUDICONV_VERSION}.tar.gz \
         | tar -vxz -C /tmp/heudiconv --strip-components=1 && \
