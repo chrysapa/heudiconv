@@ -482,10 +482,10 @@ def infotodict(seqinfo):
         ###   FIELD MAPS   ###
 
         # A) Spin-Echo distortion maps to be used with topup:
-        #  (note: we only look for magnitude images, because we'll catch
-        #   the phase images below
-        #   Also, we exclude _sbref because the sbref from MB diffusion
-        #   also have epse2d in the sequence_name
+        # As of version 1.4.0, BIDS doesn't support the `rec` entity for
+        # PE-polar fmaps, so ignore the phase images.
+        # We exclude _sbref because the sbref from MB diffusion also
+        # have epse2d in the sequence_name
         elif (
             s.dim4 <= 3
             and 'epse2d' in s.sequence_name
@@ -500,42 +500,12 @@ def infotodict(seqinfo):
             # check PE direction:
             run_dir = direction or 'normal'
 
-            # is phase image present?
-            # At least for Siemens systems, if magnitude/phase was
-            # selected, the phase images come as a separate series
-            # immediatelly following the magnitude series.
-            # (note: make sure you don't check beyond the number of
-            # elements in seqinfo...)
-            if (
-                idx+1 < len(seqinfo)
-                and seqinfo[idx+1].protocol_name == s.protocol_name
-                and 'P' in seqinfo[idx+1].image_type
-            ):
-                # we have a magnitude/phase pair:
-
-                # dictionary keys specific for this SE-fmap direction:
-                mykey_mag = create_key(
-                    'fmap',
-                    'acq-fMRI_rec-magnitude_dir-%s_run-{item:02d}_epi' % run_dir
-                )
-                mykey_pha = create_key(
-                    'fmap',
-                    'acq-fMRI_rec-phase_dir-%s_run-{item:02d}_epi' % run_dir
-                )
-                add_series_to_info_dict(s.series_id, mykey_mag, info)
-                add_series_to_info_dict(
-                    seqinfo[idx + 1].series_id, mykey_pha, info
-                )
-
-            else:
-                # we only have a magnitude image
-
-                # dictionary key specific for this SE-fmap direction:
-                mykey = create_key(
-                    'fmap',
-                    'acq-fMRI_dir-%s_run-{item:02d}_epi' % run_dir
-                )
-                add_series_to_info_dict(s.series_id, mykey, info)
+            # dictionary key specific for this SE-fmap direction:
+            mykey = create_key(
+                'fmap',
+                'acq-fMRI_dir-%s_run-{item:02d}_epi' % run_dir
+            )
+            add_series_to_info_dict(s.series_id, mykey, info)
 
         # B) GRE fmap:
         elif (

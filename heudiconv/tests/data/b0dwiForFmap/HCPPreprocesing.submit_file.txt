@@ -1,0 +1,34 @@
+# HCP Preprocessing 
+# This script requires unprocessed HCP data is downloaded then run through the hcp2bids pipeline. 
+# 15/02/2021
+# -------------------------------------------
+# Executable, arguments, Containers, apps, and universe for job set up
+
+# Comment out executable since it's called when run.py is called
+#executable = /run.py
+
+arguments = --processing_mode hcp --participant_label 100610 --coreg MSMSulc --stages PreFreeSurfer FreeSurfer PostFreeSurfer fMRIVolume fMRISurface --n_cpus $(request_cpus) --license_key CqnjjsFkm1fsFSTxYJnwNZhT --skip_bids_validation /user/HS228/dk00549/HCP/HCPSubjects /user/HS228/dk00549/HCP/HCPSubjects/output  participant
+universe         = docker
+docker_image     = bids/hcppipelines
+JobBatchName = "name"
+should_transfer_files = YES
+
+# Can comment out environment if I'm just working in the home dir
+#environment = 'mount=$ENV(PWD)'
+
+# -------------------------------------------------
+# Input, Output and Log files
+log    = c$(cluster).p$(process).log
+output = c$(cluster).p$(process).out
+error  = c$(cluster).p$(process).error
+
+# --------------------------------------
+# Resource requirements- how do I know how much of what to ask for?
+#request_GPUs     = 1
+request_CPUs     = 6
+request_memory   = 9000
+
+# -----------------------------------
+# Queue commands
+queue 1
+

@@ -1,3 +1,4 @@
+import atexit
 import logging
 import os
 import os.path as op
@@ -14,11 +15,16 @@ from .dicoms import group_dicoms_into_seqinfos
 from .utils import (
     docstring_parameter,
     StudySessionInfo,
+    TempDirs,
 )
 
 lgr = logging.getLogger(__name__)
+tempdirs = TempDirs()
+# Ensure they are cleaned up upon exit
+atexit.register(tempdirs.cleanup)
 
 _VCS_REGEX = '%s\.(?:git|gitattributes|svn|bzr|hg)(?:%s|$)' % (op.sep, op.sep)
+
 
 @docstring_parameter(_VCS_REGEX)
 def find_files(regex, topdir=op.curdir, exclude=None,
@@ -32,12 +38,16 @@ def find_files(regex, topdir=op.curdir, exclude=None,
     exclude_vcs:
       If True, excludes commonly known VCS subdirectories.  If string, used
       as regex to exclude those files (regex: `{}`)
-    topdir: basestring, optional
+    topdir: basestring or list, optional
       Directory where to search
     dirs: bool, optional
       Either to match directories as well as files
     """
-
+    if isinstance(topdir, (list, tuple)):
+        for topdir_ in topdir:
+            yield from find_files(
+                regex, topdir=topdir_, exclude=exclude, exclude_vcs=exclude_vcs, dirs=dirs)
+        return
     for dirpath, dirnames, filenames in os.walk(topdir):
         names = (dirnames + filenames) if dirs else filenames
         paths = (op.join(dirpath, name) for name in names)
@@ -67,7 +77,7 @@ def get_extracted_dicoms(fl):
     # of all files in all tarballs
 
     # cannot use TempDirs since will trigger cleanup with __del__
-    tmpdir = mkdtemp(prefix='heudiconvDCM')
+    tmpdir = tempdirs('heudiconvDCM')
 
     sessions = defaultdict(list)
     session = 0

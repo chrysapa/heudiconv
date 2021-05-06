@@ -10,6 +10,7 @@ from datetime import datetime
 import csv
 from random import sample
 from glob import glob
+import errno
 
 from .external.pydicom import dcm
 
@@ -18,10 +19,13 @@ from .utils import (
     load_json,
     save_json,
     create_file_if_missing,
-    json_dumps_pretty,
+    json_dumps,
+    update_json,
     set_readonly,
     is_readonly,
     get_datetime,
+    remove_suffix,
+    remove_prefix,
 )
 
 lgr = logging.getLogger(__name__)
@@ -44,6 +48,52 @@ class BIDSError(Exception):
     pass
 
 
+BIDS_VERSION = "1.4.1"
+
+# List defining allowed parameter matching for fmap assignment:
+SHIM_KEY = 'ShimSetting'
+AllowedFmapParameterMatching = [
+    'Shims',
+    'ImagingVolume',
+]
+# List defining allowed criteria to assign a given fmap to a non-fmap run
+# among the different fmaps with matching parameters:
+AllowedCriteriaForFmapAssignment = [
+    'First',
+    'Closest',
+]
+
+
+def maybe_na(val):
+    """Return 'n/a' if non-None value represented as str is not empty
+
+    Primarily for the consistent use of lower case 'n/a' so 'N/A' and 'NA'
+    are also treated as 'n/a'
+    """
+    if val is not None:
+        val = str(val)
+        val = val.strip()
+    return 'n/a' if (not val or val in ('N/A', 'NA')) else val
+
+
+def treat_age(age):
+    """Age might encounter 'Y' suffix or be a float"""
+    age = str(age)
+    if age.endswith('M'):
+        age = age.rstrip('M')
+        age = float(age) / 12
+        age = ('%.2f' if age != int(age) else '%d') % age
+    else:
+        age = age.rstrip('Y')
+    if age:
+        # strip all leading 0s but allow to scan a newborn (age 0Y)
+        age = '0' if not age.lstrip('0') else age.lstrip('0')
+        if age.startswith('.'):
+            # we had float point value, let's prepend 0
+            age = '0' + age
+    return age
+
+
 def populate_bids_templates(path, defaults={}):
     """Premake BIDS text files with templates"""
 
@@ -53,7 +103,7 @@ def populate_bids_templates(path, defaults={}):
         save_json(descriptor,
               OrderedDict([
                   ('Name', "TODO: name of the dataset"),
-                  ('BIDSVersion', "1.0.1"),
+                  ('BIDSVersion', BIDS_VERSION),
                   ('License', defaults.get('License',
                         "TODO: choose a license, e.g. PDDL "
                         "(http://opendatacommons.org/licenses/pddl/)")),
@@ -87,6 +137,9 @@ def populate_bids_templates(path, defaults={}):
     create_file_if_missing(op.join(path, 'README'),
         "TODO: Provide description for the dataset -- basic details about the "
         "study, possibly pointing to pre-registration (if public or embargoed)")
+    create_file_if_missing(op.join(path, 'scans.json'),
+        json_dumps(SCANS_FILE_FIELDS, sort_keys=False)
+    )
 
     populate_aggregated_jsons(path)
 
@@ -111,7 +164,8 @@ def populate_aggregated_jsons(path):
     # way too many -- let's just collect all which are the same!
     # FIELDS_TO_TRACK = {'RepetitionTime', 'FlipAngle', 'EchoTime',
     #                    'Manufacturer', 'SliceTiming', ''}
-    for fpath in find_files('.*_task-.*\_bold\.json', topdir=path,
+    for fpath in find_files('.*_task-.*\_bold\.json',
+                            topdir=glob(op.join(path, 'sub-*')),
                             exclude_vcs=True,
                             exclude="/\.(datalad|heudiconv)/"):
         #
@@ -151,7 +205,7 @@ def populate_aggregated_jsons(path):
                 #   the next for loop iteration:
                 continue
 
-        events_file = fpath[:-len(suf)] + '_events.tsv'
+        events_file = remove_suffix(fpath, suf) + '_events.tsv'
         # do not touch any existing thing, it may be precious
         if not op.lexists(events_file):
             lgr.debug("Generating %s", events_file)
@@ -274,12 +328,13 @@ def add_participant_record(studydir, subject, age, sex):
                             "control group)")])),
                 ]),
                 sort_keys=False)
+
     # Add a new participant
     with open(participants_tsv, 'a') as f:
         f.write(
           '\t'.join(map(str, [participant_id,
-                              age.lstrip('0').rstrip('Y') if age else 'N/A',
-                              sex if sex else 'n/a',
+                              maybe_na(treat_age(age)),
+                              maybe_na(sex),
                               'control'])) + '\n')
 
 
@@ -369,11 +424,6 @@ def add_rows_to_scans_keys_file(fn, newrows):
         os.unlink(fn)
     else:
         fnames2info = newrows
-        # Populate _scans.json (an optional file to describe column names in
-        # _scans.tsv). This auto generation will make BIDS-validator happy.
-        scans_json = '.'.join(fn.split('.')[:-1] + ['json'])
-        if not op.lexists(scans_json):
-            save_json(scans_json, SCANS_FILE_FIELDS, sort_keys=False)
 
     header = SCANS_FILE_FIELDS
     # prepare all the data rows
@@ -454,3 +504,380 @@ def convert_sid_bids(subject_id):
     lgr.warning('{0} contained nonalphanumeric character(s), subject '
                 'ID was cleaned to be {1}'.format(subject_id, sid))
     return sid, subject_id
+
+
+def get_shim_setting(json_file):
+    """
+    Gets the "ShimSetting" field from a json_file.
+    If not present:
+    - for fmap files: use the <acq> entity from the file name
+    - for other files: use the folder name ('anat', 'func', 'dwi', ...)
+
+    Parameters:
+    ----------
+    json_file : str
+
+    Returns:
+    -------
+    str with "ShimSetting" value or <acq> entity
+    """
+    data = load_json(json_file)
+    if SHIM_KEY in data.keys():
+        shims = data[SHIM_KEY]
+    else:
+        modality = op.basename(op.dirname(json_file))
+        if modality == 'fmap':
+            # extract the <acq> entity:
+            shims = re.search('(?<=[/_]acq-)\w+',json_file).group(0).split('_')[0]
+            if shims.lower() in ['fmri', 'bold']:
+                shims = 'func'
+        else:
+            shims = modality
+    return shims
+
+
+def find_fmap_groups(fmap_dir):
+    """
+    Finds the different fmap groups in a fmap directory.
+    By groups here we mean fmaps that are intended to go together
+    (with reversed PE polarity, magnitude/phase, etc.)
+
+    Parameters:
+    ----------
+    fmap_dir : str or os.path
+        path to the session folder (or to the subject folder, if there are no
+        sessions).
+
+    Returns:
+    -------
+    fmap_groups : dict
+        key: prefix common to the group (e.g. no "dir" entity, "_phase"/"_magnitude", ...)
+        value: list of all fmap paths in the group
+    """
+    if op.basename(fmap_dir) != 'fmap':
+        lgr.error('%s is not a fieldmap folder', fmap_dir)
+
+    # Get a list of all fmap json files in the session:
+    fmap_jsons = sorted(glob(op.join(fmap_dir, '*.json')))
+
+    # RegEx to remove fmap-specific substrings from fmap file names
+    # "_phase[1,2]", "_magnitude[1,2]", "_phasediff", "_dir-<label>", ...
+    fmap_regex = re.compile(
+        '(_dir-[0-9,a-z,A-Z]*)*'  # for pepolar case
+        '(_phase[12])*'  # for phase images
+        '(_phasediff)*'  # for phasediff images
+        '(_magnitude[12])*'  # for magnitude images
+        '(_fieldmap)*'  # for actual fieldmap images
+    )
+
+    # Find the unique prefixes ('splitext' removes the extension):
+    prefixes = sorted(
+        set(fmap_regex.sub('', remove_suffix(op.basename(fm), '.json')) for fm in fmap_jsons)
+    )
+    fmap_groups = OrderedDict()
+    for k in prefixes:
+        fmap_groups[k] = [
+            fm for fm in fmap_jsons if fmap_regex.sub('', remove_suffix(op.basename(fm), '.json')) == k
+        ]
+    return fmap_groups
+
+
+def get_key_info_for_fmap_assignment(json_file, matching_parameter='Shims'):
+    """
+    Gets key information needed to assign fmaps to other modalities.
+
+    Parameters:
+    ----------
+    json_file : str or os.path
+        path to the json file
+    matching_parameter : str in ['shims', 'imaging_volume']
+        matching_parameter that will be used to match runs
+
+    Returns:
+    -------
+    key_info : dict
+        part of the json file that will need to match between the fmap and
+        the other image
+    """
+    if not op.exists(json_file):
+        raise FileNotFoundError(
+            errno.ENOENT, os.strerror(errno.ENOENT), json_file
+        )
+    if matching_parameter not in AllowedFmapParameterMatching:
+        raise ValueError(
+            "Fmap matching_parameter %s not allowed." % matching_parameter
+        )
+
+    # loop through the possible criteria and extract the info needed
+    if matching_parameter == 'Shims':
+        key_info = [get_shim_setting(json_file)]
+    elif matching_parameter == 'ImagingVolume':
+        from nibabel import load as nb_load
+        nifti_file = glob(remove_suffix(json_file, '.json') + '.nii*')
+        nifti_header = nb_load(nifti_file).header
+        key_info = [nifti_header.affine, nifti_header.dim[1:3]]
+
+    return key_info
+
+
+def find_compatible_fmaps_for_run(json_file, fmap_groups, matching_parameter='Shims'):
+    """
+    Finds compatible fmaps for a given run, for populate_intended_for.
+
+    Parameters:
+    ----------
+    json_file : str or os.path
+        path to the json file
+    fmap_groups : dict
+        key: prefix common to the group
+        value: list of all fmap paths in the group
+    matching_parameter : str in ['shims', 'imaging_volume']
+        matching_parameter that will be used to match runs
+
+    Returns:
+    -------
+    compatible_fmap_groups : dict
+        Subset of the fmap_groups which match json_file, according
+        to the matching_parameter.
+        key: prefix common to the group
+        value: list of all fmap paths in the group
+    """
+    if matching_parameter not in AllowedFmapParameterMatching:
+        raise ValueError(
+            "Fmap matching_parameter %s not allowed." % matching_parameter
+        )
+
+    lgr.debug('Looking for fmaps for %s', json_file)
+    json_info = get_key_info_for_fmap_assignment(json_file, matching_parameter)
+
+    compatible_fmap_groups = {}
+    for fm_key, fm_group in fmap_groups.items():
+        # check the key_info for one (the first) of the fmaps in the group:
+        fm_info = get_key_info_for_fmap_assignment(fm_group[0], matching_parameter)
+        if json_info == fm_info:
+            compatible_fmap_groups[fm_key] = fm_group
+
+    return compatible_fmap_groups
+
+
+def find_compatible_fmaps_for_session(path_to_bids_session, matching_parameter='Shims'):
+    """
+    Finds compatible fmaps for all non-fmap runs in a session.
+
+    Parameters:
+    ----------
+    path_to_bids_session : str or os.path
+        path to the session folder (or to the subject folder, if there are no
+        sessions).
+    matching_parameter : str in ['shims', 'imaging_volume']
+        matching_parameter that will be used to match runs
+
+    Returns:
+    -------
+    compatible_fmap : dict
+        Dict of compatible_fmaps_groups (values) for each non-fmap run (keys)
+    """
+    if matching_parameter not in AllowedFmapParameterMatching:
+        raise ValueError(
+            "Fmap matching_parameter %s not allowed." % matching_parameter
+        )
+
+    lgr.debug('Looking for fmaps for session: %s', path_to_bids_session)
+
+    # Resolve path (eliminate '..')
+    path_to_bids_session = op.abspath(path_to_bids_session)
+
+    # find the different groups of fmaps:
+    fmap_dir = op.join(path_to_bids_session, 'fmap')
+    if not op.exists(fmap_dir):
+        lgr.warning('We cannot add the IntendedFor field: no fmap/ in %s', path_to_bids_session)
+        return
+    fmap_groups = find_fmap_groups(fmap_dir)
+
+    # Get a set with all non-fmap json files in the session (exclude SBRef files).
+    session_jsons = [
+        j for j in glob(op.join(path_to_bids_session, '*/*.json')) if not (
+            op.basename(op.dirname(j)) == 'fmap'
+            or remove_suffix(j, '.json').endswith('_sbref')
+        )
+    ]
+
+    # Loop through session_jsons and find the compatible fmap_groups for each
+    compatible_fmaps = {
+        j: find_compatible_fmaps_for_run(j, fmap_groups, matching_parameter)
+        for j in session_jsons
+    }
+    return compatible_fmaps
+
+
+def select_fmap_from_compatible_groups(json_file, compatible_fmap_groups, criterion):
+    """
+    Selects the fmap that will be used to correct for distortions in json_file
+    from the compatible fmap_groups list, based on the given criterion
+
+    Parameters:
+    ----------
+    json_file : str or os.path
+        path to the json file
+    compatible_fmap_groups : dict
+        fmap_groups that are compatible with the specific json_file
+    criterion : str in ['First', 'Closest']
+        matching_parameter that will be used to decide which fmap to use
+
+    Returns:
+    -------
+    selected_fmap_key : str or os.path
+        key from the compatible_fmap_groups for the selected fmap group
+    """
+    if criterion not in AllowedCriteriaForFmapAssignment:
+        raise ValueError(
+            "Fmap assignment criterion '%s' not allowed." % criterion
+        )
+
+    if len(compatible_fmap_groups) == 0:
+        return None
+    # if compatible_fmap_groups has only one entry, that's it:
+    elif len(compatible_fmap_groups) == 1:
+        return list(compatible_fmap_groups.keys())[0]
+
+    # get the modality folders, then session folder:
+    modality_folders = set(
+        op.dirname(fmap) for v in compatible_fmap_groups.values() for fmap in v
+    )      # there should be only one value, ending in 'fmap'
+    sess_folder = set(op.dirname(k) for k in modality_folders)
+    if len(sess_folder) > 1:
+        # for now, we only deal with single sessions:
+        raise RuntimeError
+    # if we made it here, we have only one session:
+    sess_folder = list(sess_folder)[0]
+
+    # get acquisition times from '_scans.tsv':
+    try:
+        scans_tsv = glob(op.join(sess_folder,'*_scans.tsv'))[0]
+    except IndexError:
+        raise FileNotFoundError("No '*_scans' file found for session %s" % sess_folder)
+    with open(scans_tsv) as f:
+        # read the contents, splitting by lines and by tab separators:
+        scans_tsv_content = [line.split('\t') for line in f.read().splitlines()]
+    # get column indices for filename and acq_time from the first line:
+    (fname_idx, time_idx) = (scans_tsv_content[0].index(k) for k in ['filename', 'acq_time'])
+    acq_times = {line[fname_idx]: line[time_idx] for line in scans_tsv_content[1:]}
+    # acq_times for the compatible fmaps:
+    acq_times_fmaps = {
+        k: acq_times[
+            # remove session folder and '.json', add '.nii.gz':
+            remove_suffix(remove_prefix(v[0], sess_folder + op.sep), '.json') + '.nii.gz'
+            ]
+        for k, v in compatible_fmap_groups.items()
+    }
+
+    if criterion == 'First':
+        # find the first acquired fmap_group from the compatible_fmap_groups:
+        first_acq_time = sorted(acq_times_fmaps.values())[0]
+        selected_fmap_key = [
+            k for k, v in acq_times_fmaps.items() if v == first_acq_time
+        ][0]
+    elif criterion == 'Closest':
+        json_acq_time = datetime.strptime(
+            acq_times[
+                # remove session folder and '.json', add '.nii.gz':
+                remove_suffix(remove_prefix(json_file, sess_folder + op.sep), '.json') + '.nii.gz'
+            ],
+            "%Y-%m-%dT%H:%M:%S.%f"
+        )
+        # differences in acquisition time (abs value):
+        diff_fmaps_acq_times = {
+            k: abs(datetime.strptime(v, "%Y-%m-%dT%H:%M:%S.%f")-json_acq_time)
+            for k, v in acq_times_fmaps.items()
+        }
+        min_diff_acq_times = sorted(diff_fmaps_acq_times.values())[0]
+        selected_fmap_key = [
+            k for k, v in diff_fmaps_acq_times.items() if v == min_diff_acq_times
+        ][0]
+
+    return selected_fmap_key
+
+
+def populate_intended_for(path_to_bids_session, matching_parameter='Shims', criterion='Closest'):
+    """
+    Adds the 'IntendedFor' field to the fmap .json files in a session folder.
+    It goes through the session folders and for every json file, it finds
+    compatible_fmaps: fmaps that have the same matching_parameter as the json
+    file (e.g., same 'Shims').
+
+    If there are more than one compatible_fmaps, it will use the criterion
+    specified by the user (default: 'Closest' in time).
+
+    Because fmaps come in groups (with reversed PE polarity, or magnitude/
+    phase), we work with fmap_groups.
+
+    Parameters:
+    ----------
+    path_to_bids_session : str or os.path
+        path to the session folder (or to the subject folder, if there are no
+        sessions).
+    matching_parameter : str in ['shims', 'imaging_volume']
+        matching_parameter that will be used to match runs
+    criterion : str in ['First', 'Closest']
+        matching_parameter that will be used to decide which of the matching
+        fmaps to use
+    """
+
+    if matching_parameter not in AllowedFmapParameterMatching:
+        raise ValueError(
+            "Fmap matching_parameter %s not allowed." % matching_parameter
+        )
+    if criterion not in AllowedCriteriaForFmapAssignment:
+        raise ValueError(
+            "Fmap assignment criterion '%s' not allowed." % criterion
+        )
+
+    lgr.info('Adding "IntendedFor" to the fieldmaps in %s.', path_to_bids_session)
+
+    # Resolve path (eliminate '..')
+    path_to_bids_session = op.abspath(path_to_bids_session)
+
+    # Get the subject folder (if "path_to_bids_session" includes the session,
+    # remove it). "IntendedFor" paths will be relative to it.
+    if op.basename(path_to_bids_session).startswith('ses-'):
+        subj_folder = op.dirname(path_to_bids_session)
+    else:
+        subj_folder = path_to_bids_session
+
+    fmap_dir = op.join(path_to_bids_session, 'fmap')
+    if not op.exists(fmap_dir):
+        lgr.warning('We cannot add the IntendedFor field: no fmap/ in %s', path_to_bids_session)
+        return
+
+    compatible_fmaps = find_compatible_fmaps_for_session(
+        path_to_bids_session,
+        matching_parameter=matching_parameter
+    )
+    selected_fmaps = {}
+    for json_file, fmap_groups in compatible_fmaps.items():
+        if not op.dirname(json_file).endswith('fmap'):
+            selected_fmaps[json_file] = select_fmap_from_compatible_groups(
+                json_file,
+                fmap_groups,
+                criterion=criterion
+            )
+
+    # Loop through all the unique fmap_groups in compatible_fmaps:
+    unique_fmap_groups = {}
+    for cf in compatible_fmaps.values():
+        for (key, values) in cf.items():
+            if key not in unique_fmap_groups:
+                unique_fmap_groups[key] = values
+
+    for fmap_group in unique_fmap_groups:
+        intended_for = []
+        for json_file, selected_fmap_group in selected_fmaps.items():
+            if selected_fmap_group and (fmap_group in selected_fmap_group):
+                intended_for.append(
+                    op.relpath(remove_suffix(json_file, '.json') + '.nii.gz', start=subj_folder)
+                )
+        if intended_for:
+            intended_for = sorted([str(f) for f in intended_for])
+            # Add this intended_for to all fmap files in the fmap_group:
+            for fm_json in unique_fmap_groups[fmap_group]:
+                update_json(fm_json, {"IntendedFor": intended_for}, pretty=True)

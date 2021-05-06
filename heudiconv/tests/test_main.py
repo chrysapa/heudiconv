@@ -1,16 +1,20 @@
 # TODO: break this up by modules
 
 from heudiconv.cli.run import main as runner
-from heudiconv.main import workflow
+from heudiconv.main import (workflow,
+                            process_extra_commands)
 from heudiconv import __version__
 from heudiconv.utils import (create_file_if_missing,
+                             load_json,
                              set_readonly,
                              is_readonly)
 from heudiconv.bids import (populate_bids_templates,
                             add_participant_record,
                             get_formatted_scans_key_row,
                             add_rows_to_scans_keys_file,
-                            find_subj_ses)
+                            find_subj_ses,
+                            SCANS_FILE_FIELDS,
+                            )
 from heudiconv.external.dlad import MIN_VERSION, add_to_datalad
 
 from .utils import TESTS_DATA_PATH
@@ -81,6 +85,9 @@ def test_populate_bids_templates(tmpdir):
     assert "something" not in description_file.read()
     assert "TODO" in description_file.read()
 
+    # Explicit str() is needed for py 3.5. TODO: remove when dropping 3.5
+    assert load_json(str(tmpdir / "scans.json")) == SCANS_FILE_FIELDS
+
 
 def test_add_participant_record(tmpdir):
     tf = tmpdir.join('participants.tsv')
@@ -127,6 +134,7 @@ def test_prepare_for_datalad(tmpdir):
         '.gitattributes',
         '.datalad/config', '.datalad/.gitattributes',
         'dataset_description.json',
+        'scans.json',
         'CHANGES', 'README'}
     assert set(ds.repo.get_indexed_files()) == target_files
     # and all are under git
@@ -155,7 +163,7 @@ def test_prepare_for_datalad(tmpdir):
     assert '.heudiconv/dummy.nii.gz' in ds.repo.get_files()
 
     # Let's now roll back and make it a proper submodule
-    ds.repo._git_custom_command([], ['git', 'reset', '--hard', old_hexsha])
+    ds.repo.call_git(['reset', '--hard', old_hexsha])
     # now we do not add dummy to git
     create_file_if_missing(dummy_path, '')
     add_to_datalad(str(tmpdir), studydir_, None, False)
@@ -217,7 +225,9 @@ def test_add_rows_to_scans_keys_file(tmpdir):
         assert dates == sorted(dates)
 
     _check_rows(fn, rows)
-    assert op.exists(opj(tmpdir.strpath, 'file.json'))
+    # we no longer produce a sidecar .json file there and only generate
+    # it while populating templates for BIDS
+    assert not op.exists(opj(tmpdir.strpath, 'file.json'))
     # add a new one
     extra_rows = {
         'a_new_file.nii.gz': ['2016adsfasd23', '', 'fasadfasdf'],
@@ -295,3 +305,33 @@ def test_no_etelemetry():
     with patch.dict('sys.modules', {'etelemetry': None}):
         workflow(outdir='/dev/null', command='ls',
                  heuristic='reproin', files=[])
+
+
+# Test two scenarios:
+# -study without sessions
+# -study with sessions
+# The "expected_folder" is the session folder without the tmpdir
+@pytest.mark.parametrize(
+    "session, expected_folder", [
+        ('', '/foo/sub-{sID}'),
+        ('pre', '/foo/sub-{sID}/ses-pre')
+    ]
+)
+def test_populate_intended_for(session, expected_folder, capfd):
+    """
+    Tests for "process_extra_commands" when the command is
+    'populate-intended-for'
+    """
+    # Because the function .utils.populate_intended_for already has its own
+    # tests, here we just test that "process_extra_commands", when 'command'
+    # is 'populate_intended_for' does what we expect (loop through the list of
+    # subjects and calls 'populate_intended_for'). We call it using folders
+    # that don't exist, and check that the output is the expected.
+    bids_folder = expected_folder.split('sub-')[0]
+    subjects = ['1', '2']
+    process_extra_commands(bids_folder, 'populate-intended-for', [], '',
+                           '', session, subjects, None)
+    captured_output = capfd.readouterr().err
+    for s in subjects:
+        expected_info = 'Adding "IntendedFor" to the fieldmaps in ' + expected_folder.format(sID=s)
+        assert expected_info in captured_output
