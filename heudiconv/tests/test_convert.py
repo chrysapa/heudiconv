@@ -126,7 +126,7 @@ def test_b0dwi_for_fmap(tmpdir, capfd):
 )
 # Two possibilities: with or without heuristics:
 @pytest.mark.parametrize(
-    "heuristic", ['example', None]       # heuristics/example.py
+    "heuristic", ['example', 'reproin', None]       # heuristics/example.py, heuristics/reproin.py
 )
 def test_populate_intended_for(tmpdir, monkeypatch, capfd,
                  subjects, sesID, expected_session_folder,
@@ -139,12 +139,12 @@ def test_populate_intended_for(tmpdir, monkeypatch, capfd,
     More tests can be added here.
     """
 
-    def mock_populate_intended_for(session, matching_parameter='Shims', criterion='Closest'):
+    def mock_populate_intended_for(session, matching_parameters='Shims', criterion='Closest'):
         """
         Pretend we run populate_intended_for, but just print out the arguments.
         """
         print('session: {}'.format(session))
-        print('matching_parameter: {}'.format(matching_parameter))
+        print('matching_parameters: {}'.format(matching_parameters))
         print('criterion: {}'.format(criterion))
         return
     # mock the "populate_intended_for":
@@ -163,24 +163,30 @@ def test_populate_intended_for(tmpdir, monkeypatch, capfd,
         for s in subjects
     ]
 
-    heuristic = load_heuristic('example') if heuristic else None
+    heuristic = load_heuristic(heuristic) if heuristic else None
     heudiconv.convert.convert(items,
             converter='',
             scaninfo_suffix='.json',
             custom_callable=None,
-            populate_intended_for_opts=getattr(heuristic, 'POPULATE_INTENDED_FOR_OPTS', {}),
+            populate_intended_for_opts=getattr(heuristic, 'POPULATE_INTENDED_FOR_OPTS', None),
             with_prov=None,
             bids_options=[],
             outdir=outdir,
             min_meta=True,
             overwrite=False)
     output = capfd.readouterr()
-    assert all([
-        "\n".join([
-            "session: " + outfolder.format(sID=s, ses=sesID),
-            # "ImagingVolume" is defined in heuristic file; "Shims" is the default
-            "matching_parameter: " + ("ImagingVolume" if heuristic else "Shims"),
-            "criterion: Closest"
-        ]) in output.out
-        for s in subjects
-    ])
+    # if the heuristic module has a 'POPULATE_INTENDED_FOR_OPTS' field, we expect
+    # to get the output of the mock_populate_intended_for, otherwise, no output:
+    if getattr(heuristic, 'POPULATE_INTENDED_FOR_OPTS', None):
+        assert all([
+            "\n".join([
+                "session: " + outfolder.format(sID=s, ses=sesID),
+                # "ImagingVolume" is defined in heuristic file; "Shims" is the default
+                "matching_parameters: " + "ImagingVolume",
+                "criterion: Closest"
+            ]) in output.out
+            for s in subjects
+        ])
+    else:
+        # If there was no heuristic, make sure populate_intended_for was not called
+        assert not output.out
