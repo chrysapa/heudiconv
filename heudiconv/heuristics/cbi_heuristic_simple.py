@@ -344,6 +344,14 @@ def infotodict(seqinfo):
             acq = 'fse' + direction   # if direction is empty, aqc='fse'
             info[t1].append({'item': s.series_id, 'acq': acq})
 
+        # 4) ME-MPRAGE:
+        # several volumes, series description includes "tfl_me3d":
+        elif (
+            s.sequence_name.startswith('tfl_me3d')
+        ):
+            acq = 'highres' + direction   # if direction is empty, aqc='highres'
+            info[t1].append({'item': s.series_id, 'acq': acq})
+
         ###   T2w   ###
         # 1) Standard high-res T2w used for cortical segmentation:
         # single volume, protocol name including T2, T2w, TSE, SPACE, SPC:
