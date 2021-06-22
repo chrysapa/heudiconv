@@ -75,7 +75,7 @@ def extract_task_name(prot_name):
 
     # if we don't find a known task, try finding the keyword "task":
     if task_name == '':
-        if 'task' in prot_name:
+        if 'task' in prot_name and not prot_name.endswith('task'):
             # we want to capture what comes after "task", up to the next
             #    dash ("-") or underscore ("_"):
             task_name = prot_name.split('task')[1]
@@ -213,15 +213,23 @@ def sort_seqinfo_by_series_date_time(seqinfo):
         # sort series with identical date and time by series_uid:
         for sid in sorted([s.series_uid for s in dTseries if s.series_uid]):
             for ss in dTseries:
-                if ss.series_uid==sid:
+                if ss.series_uid == sid:
                     sortedSeqinfo.append(ss)
+                    # add the following series if they don't have date and time:
+                    idx = seqinfo.index(ss) + 1
+                    while (
+                            idx < len(seqinfo)
+                            and not (seqinfo[idx].date and seqinfo[idx].time)
+                    ):
+                        sortedSeqinfo.append(seqinfo[idx])
+                        idx += 1
 
         # Now, add the series which do not have series_uid:
         for ss in dTseries:
             if ss not in sortedSeqinfo:
                 sortedSeqinfo.append(ss)
 
-    # Now, add the series which do not have date or time:
+    # Now, add any missing series:
     for ss in seqinfo:
         if ss not in sortedSeqinfo:
             sortedSeqinfo.append(ss)
@@ -351,6 +359,7 @@ def infotodict(seqinfo):
         ):
             acq = 'highres' + direction   # if direction is empty, aqc='highres'
             info[t1].append({'item': s.series_id, 'acq': acq})
+
 
         ###   T2w   ###
         # 1) Standard high-res T2w used for cortical segmentation:
@@ -490,10 +499,10 @@ def infotodict(seqinfo):
         ###   FIELD MAPS   ###
 
         # A) Spin-Echo distortion maps to be used with topup:
-        # As of version 1.4.0, BIDS doesn't support the `rec` entity for
-        # PE-polar fmaps, so ignore the phase images.
-        # We exclude _sbref because the sbref from MB diffusion also
-        # have epse2d in the sequence_name
+        #  (note: we only look for magnitude images, because we'll catch
+        #   the phase images below
+        #   Also, we exclude _sbref because the sbref from MB diffusion
+        #   also have epse2d in the sequence_name
         elif (
             s.dim4 <= 3
             and 'epse2d' in s.sequence_name
