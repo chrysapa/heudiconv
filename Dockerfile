@@ -31,7 +31,7 @@ RUN mkdir /tmp/dcmstack && \
 
 # Install dcm2niix from github (it requires git to "superbuild"):
 # Install also pigz-- it makes dcm2niix compress NIfTI files faster
-ENV DCM2NIIX_VERSION=v1.0.20210317
+ENV DCM2NIIX_VERSION=v1.0.20230411
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y pigz git-core && \
     apt-get clean -y && apt-get autoclean -y && apt-get autoremove -y && \
@@ -54,9 +54,9 @@ RUN mkdir /tmp/bidsphysio && \
     rm -rf /tmp/bidsphysio
 
 # Install heudiconv from github:
-ENV CBIHEUDICONV_VERSION=v3.7.0
+ENV CBIHEUDICONV_VERSION=v3.8.0
 RUN mkdir /tmp/heudiconv && \
-    curl -sSL https://github.com/cbinyu/heudiconv/archive/${CBIHEUDICONV_VERSION}.tar.gz \
+    curl -sSL https://github.com/chrysapa/heudiconv/archive/${CBIHEUDICONV_VERSION}.tar.gz \
         | tar -vxz -C /tmp/heudiconv --strip-components=1 && \
     cd /tmp/heudiconv && \
     pip install . && \
