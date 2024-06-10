@@ -22,12 +22,12 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
 
 # Install dcmstack from github:
 #ENV DCMSTACK_VERSION=v0.8
-RUN mkdir /tmp/dcmstack && \
-    curl -sSL https://github.com/moloney/dcmstack.tar.gz \
-        | tar -vxz -C /tmp/dcmstack --strip-components=1 && \
-    cd /tmp/dcmstack && \
-    python setup.py install && \
-    cd / && rm -rf /tmp/dcmstack
+#RUN mkdir /tmp/dcmstack && \
+   # curl -sSL https://github.com/moloney/dcmstack.tar.gz \
+   #     | tar -vxz -C /tmp/dcmstack --strip-components=1 && \
+   # cd /tmp/dcmstack && \
+   # python setup.py install && \
+   # cd / && rm -rf /tmp/dcmstack
 
 # Install dcm2niix from github (it requires git to "superbuild"):
 # Install also pigz-- it makes dcm2niix compress NIfTI files faster
