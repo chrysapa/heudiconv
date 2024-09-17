@@ -24,7 +24,7 @@ PYTHON_REQUIRES = ">=3.8"
 REQUIRES = [
     # not usable in some use cases since might be just a downloader, not binary
     # 'dcm2niix',
-    "dcmstack>=0.8",
+    "dcmstack>=0.9",
     "etelemetry",
     "filelock>=3.0.12",
     "nibabel",
