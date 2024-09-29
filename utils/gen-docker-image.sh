@@ -11,7 +11,7 @@ docker run --rm $image generate docker \
     --base-image neurodebian:bullseye \
     --pkg-manager apt \
     --dcm2niix \
-        version=v1.0.20220720 \
+        version=v1.0.20240202 \
         method=source \
         cmake_opts="-DZLIB_IMPLEMENTATION=Cloudflare -DUSE_JPEGLS=ON -DUSE_OPENJPEG=ON" \
     --install \
