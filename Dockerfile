@@ -19,7 +19,7 @@ RUN apt-get update -qq \
     && git checkout v1.0.20240202 \
     && mkdir /tmp/dcm2niix/build \
     && cd /tmp/dcm2niix/build \
-    && cmake -DZLIB_IMPLEMENTATION=Cloudflare -DUSE_JPEGLS=ON -DUSE_OPENJPEG=ON -DCMAKE_INSTALL_PREFIX:PATH=/opt/dcm2niix-v1.0.20220720 .. \
+    && cmake -DZLIB_IMPLEMENTATION=Cloudflare -DUSE_JPEGLS=ON -DUSE_OPENJPEG=ON -DCMAKE_INSTALL_PREFIX:PATH=/opt/dcm2niix-v1.0.20240202 .. \
     && make -j1 \
     && make install \
     && rm -rf /tmp/dcm2niix
@@ -99,7 +99,7 @@ RUN printf '{ \
     { \
       "name": "run", \
       "kwds": { \
-        "command": "apt-get update -qq\\napt-get install -y -q --no-install-recommends \\\\\\n    ca-certificates \\\\\\n    cmake \\\\\\n    g++ \\\\\\n    gcc \\\\\\n    git \\\\\\n    make \\\\\\n    pigz \\\\\\n    zlib1g-dev\\nrm -rf /var/lib/apt/lists/*\\ngit clone https://github.com/rordenlab/dcm2niix /tmp/dcm2niix\\ncd /tmp/dcm2niix\\ngit fetch --tags\\ngit checkout v1.0.20220720\\nmkdir /tmp/dcm2niix/build\\ncd /tmp/dcm2niix/build\\ncmake -DZLIB_IMPLEMENTATION=Cloudflare -DUSE_JPEGLS=ON -DUSE_OPENJPEG=ON -DCMAKE_INSTALL_PREFIX:PATH=/opt/dcm2niix-v1.0.20220720 ..\\nmake -j1\\nmake install\\nrm -rf /tmp/dcm2niix" \
+        "command": "apt-get update -qq\\napt-get install -y -q --no-install-recommends \\\\\\n    ca-certificates \\\\\\n    cmake \\\\\\n    g++ \\\\\\n    gcc \\\\\\n    git \\\\\\n    make \\\\\\n    pigz \\\\\\n    zlib1g-dev\\nrm -rf /var/lib/apt/lists/*\\ngit clone https://github.com/rordenlab/dcm2niix /tmp/dcm2niix\\ncd /tmp/dcm2niix\\ngit fetch --tags\\ngit checkout v1.0.20240202\\nmkdir /tmp/dcm2niix/build\\ncd /tmp/dcm2niix/build\\ncmake -DZLIB_IMPLEMENTATION=Cloudflare -DUSE_JPEGLS=ON -DUSE_OPENJPEG=ON -DCMAKE_INSTALL_PREFIX:PATH=/opt/dcm2niix-v1.0.20240202 ..\\nmake -j1\\nmake install\\nrm -rf /tmp/dcm2niix" \
       } \
     }, \
     { \
