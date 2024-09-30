@@ -16,7 +16,7 @@ RUN apt-get update -qq \
     && git clone https://github.com/rordenlab/dcm2niix /tmp/dcm2niix \
     && cd /tmp/dcm2niix \
     && git fetch --tags \
-    && git checkout v1.0.20220720 \
+    && git checkout v1.0.20240202 \
     && mkdir /tmp/dcm2niix/build \
     && cd /tmp/dcm2niix/build \
     && cmake -DZLIB_IMPLEMENTATION=Cloudflare -DUSE_JPEGLS=ON -DUSE_OPENJPEG=ON -DCMAKE_INSTALL_PREFIX:PATH=/opt/dcm2niix-v1.0.20220720 .. \
@@ -93,7 +93,7 @@ RUN printf '{ \
     { \
       "name": "env", \
       "kwds": { \
-        "PATH": "/opt/dcm2niix-v1.0.20220720/bin:$PATH" \
+        "PATH": "/opt/dcm2niix-v1.0.20240202/bin:$PATH" \
       } \
     }, \
     { \
