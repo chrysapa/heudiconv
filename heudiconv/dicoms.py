@@ -158,7 +158,7 @@ def create_seqinfo(
         date=dcminfo.get("AcquisitionDate"),
         series_uid=dcminfo.get("SeriesInstanceUID"),
         time=dcminfo.get("AcquisitionTime"),
-        custom=custom_seqinfo_data,
+        instance_creation_time=dcminfo.get("InstanceCreationTime"),
     )
 
 
